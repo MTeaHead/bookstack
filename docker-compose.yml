@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  booktree:
+    #image: myxdvz/booktree
+    container_name: booktree
+    build:
+      context: ./booktree/booktree/  # Adjust this path to where your Dockerfile is located
+      dockerfile: Dockerfile
+      args:
+        UID: 1000  # Replace with the desired UID
+        GID: 1000  # Replace with the desired GID
+        USER: bookstack  # Replace with the desired username
+        GROUPNAME: bookstack  # Replace with the desired group name
+    network_mode: host  # Use host network
+    volumes:
+     # - ./data:/data  # Mount the shared data directory
+      - ./data/transmission-openvpn/data/completed:/data/completed #share the completed torrents
+      - ./data/media:/data/media # place to move them to (/media/audiobooks/mam)
+      - ./data/calibre/config/ingest:/data/calibre/ingest
+      - ./data/calibre/config/books:/data/calibre/books
+      - ./data/booktree/config:/config
+      - ./data/booktree/logs:/logs
+   # command: /venv/bin/python booktree.py /config/transmission.cfg  # Run the script with the config
+    command: sh -c "/config/watchdog.sh" #updated to run with a watchdog process checking for new files
+
+  calibre-web-automated:
+    image: crocodilestick/calibre-web-automated:latest
+    container_name: calibre-web-automated
+    environment:
+      # Only change these if you know what you're doing
+      - PUID=1000
+      - PGID=1000
+      # Edit to match your current timezone https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+      - TZ=UTC
+    volumes:
+      # CW users migrating should stop their existing CW instance, make a copy of the config folder, and bind that here to carry over all of their user settings ect.
+      - ./data/calibre/config:/config
+      # This is an ingest dir, NOT a library one. Anything added here will be automatically added to your library according to the settings you have configured in CWA Settings page. All files placed here are REMOVED AFTER PROCESSING
+      - ./data/calibre/config/ingest:/cwa-book-ingest
+      # If you don't have an existing library, CWA will automatically create one at the bind provided here
+      - ./data/calibre/config/books:/calibre-library
+    ports:
+      # Change the first number to change the port you want to access the Web UI, not the second
+      - 8083:8083
+    restart: unless-stopped
+
+  transmission-openvpn:
+    cap_add:
+        - NET_ADMIN
+    volumes:
+        - './protonvpn/:/etc/openvpn/custom/'
+        - './data/transmission-openvpn/data:/data'
+        - './data/transmission-openvpn/config:/config'
+        - './data/transmission-openvpn/mam-start.sh:/scripts/routes-post-start.sh'
+        - './data/transmission-openvpn/mam.sh:/config/mam.sh'
+
+    environment:
+        - OPENVPN_PROVIDER=${VPN_PROVIDER}
+        - OPENVPN_CONFIG=nl.protonvpn.tcp
+        - OPENVPN_USERNAME=${OPENVPN_USERNAME}+pmp
+        - OPENVPN_PASSWORD=${OPENVPN_PASSWORD}
+        - LOCAL_NETWORK=${LOCAL_NETWORK}
+        - MAM_TORRENT_ID=${MAM_TORRENT_ID}
+        - DISABLE_PORT_FORWARDER=false
+        - OPENVPN_OPTS=--inactive 3600 --ping 10 --ping-exit 60
+    logging:
+        driver: json-file
+        options:
+            max-size: 10m
+    ports:
+        - '9091:9091'
+    image: haugene/transmission-openvpn:dev
+
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:latest
+    ports:
+      - 13378:80
+    volumes:
+      - ./data/media/audiobooks/mam:/audiobooks
+      - ./data/abs/podcasts:/podcasts
+      - ./data/abs/config:/config
+      - ./data/abs/metadata:/metadata
+    environment:
+      - TZ=America/Toronto

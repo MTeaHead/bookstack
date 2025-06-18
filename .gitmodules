@@ -1,0 +1,3 @@
+[submodule "booktree"]
+	path = booktree
+	url = https://github.com/myxdvz/booktree
